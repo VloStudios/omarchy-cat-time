@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "vlostudios.cat-time",
+  "name": "Cat Time",
+  "version": "1.0.0",
+  "author": "VloStudios",
+  "description": "Per-day screen and sleep limits with friendly cat lock screens",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "CatTime.qml" },
+  "barWidget": {
+    "displayName": "Cat Time",
+    "description": "Daily screen-time and sleep-time limits",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
