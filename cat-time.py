@@ -3,12 +3,15 @@ import argparse
 import datetime as dt
 import json
 import os
+import secrets
+import stat
 import subprocess
 from pathlib import Path
 
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "cat-time"
 STATE_FILE = STATE_DIR / "state.json"
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+MAX_STATE_BYTES = 1024 * 1024
 
 
 def defaults():
@@ -21,10 +24,23 @@ def defaults():
 def load():
     data = defaults()
     try:
-        saved = json.loads(STATE_FILE.read_text())
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NONBLOCK"):
+            flags |= os.O_NONBLOCK
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(STATE_FILE, flags)
+        with os.fdopen(fd, "rb") as state_file:
+            file_stat = os.fstat(state_file.fileno())
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError("state file must be a regular file")
+            saved_text = state_file.read(MAX_STATE_BYTES + 1)
+            if len(saved_text) > MAX_STATE_BYTES:
+                raise ValueError("state file too large")
+        saved = json.loads(saved_text.decode("utf-8"))
         if isinstance(saved, dict):
             data.update(saved)
-    except (OSError, ValueError):
+    except (OSError, ValueError, UnicodeDecodeError):
         pass
     if not isinstance(data.get("schedule"), list) or len(data["schedule"]) != 7:
         data["schedule"] = defaults()["schedule"]
@@ -33,9 +49,20 @@ def load():
 
 def save(data):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
-    tmp.replace(STATE_FILE)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    tmp = STATE_DIR / f".{STATE_FILE.name}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(json.dumps(data, indent=2) + "\n")
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        os.replace(tmp, STATE_FILE)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def hm(value):
